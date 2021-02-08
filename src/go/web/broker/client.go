@@ -310,7 +310,40 @@ func (this *Client) screenshots() {
 		case <-ticker.C:
 			this.RLock()
 
+			//Do not get screenshots for experiments that are not running
+			if this.vms == nil {
+				this.RUnlock()
+				continue
+			}
+
+			exp, err := experiment.Get(this.vms[0].exp)
+
+			// If the experiment has been deleted,
+			// make sure that the namespace has been cleared
+			if err != nil {
+				mm.ClearNamespace(this.vms[0].exp)				
+				this.RUnlock()
+				continue
+			}
+
+			// If the experiment is no longer running
+			// clear the namespace in case one of the clients
+			// recreated the namespace
+			if !exp.Running() {
+				mm.ClearNamespace(this.vms[0].exp)
+				this.RUnlock()
+				continue
+
+			}
+
 			for _, v := range this.vms {
+
+				//Do not get screenshots for vms that are not running
+				state,err := mm.GetVMState(mm.NS(v.exp), mm.VMName(v.name))				
+				if state != "RUNNING" || err != nil {
+					continue	
+				}
+
 				screenshot, err := util.GetScreenshot(v.exp, v.name, "200")
 				if err != nil {
 					log.Error("getting screenshot for WebSocket client: %v", err)
