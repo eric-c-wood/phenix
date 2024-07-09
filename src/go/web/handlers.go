@@ -187,7 +187,6 @@ func CreateExperiment(w http.ResponseWriter, r *http.Request) {
 		experiment.CreatedWithDisabledApplications(req.DisabledApps),
 		experiment.CreateWithDeployMode(deployMode),
 		experiment.CreateWithDefaultBridge(req.DefaultBridge),
-		experiment.CreateWithGREMesh(req.UseGreMesh),
 	}
 
 	if req.WorkflowBranch != "" {
@@ -484,6 +483,12 @@ func StopExperiment(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+
+	broker.Broadcast(
+		bt.NewRequestPolicy("experiments/stop", "update", name),
+		bt.NewResource(fmt.Sprintf("experiment/stopped/%s", name), name, "update"),
+		body,
+	)
 
 	w.Write(body)
 	return nil

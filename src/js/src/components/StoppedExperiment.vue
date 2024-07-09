@@ -106,13 +106,12 @@
         v-model="searchName"
         :placeholder="searchPlaceholder"
         icon="search"
-        :data="searchHistory"
-        @typing="searchVMs"
-        @select="option => searchVMs(option)">   
+        :data="searchHistory"        
+        @select="option => filtered = option">  
           <template slot="empty">No results found</template>
       </b-autocomplete>
       <p class='control'>
-         <button class='button' style="color:#686868" @click="searchVMs(''); filesTable.category = null">
+         <button class='button' style="color:#686868" @click="searchName = ''; filesTable.category = null">
           <b-icon icon="window-close"></b-icon>
         </button>
       </p>
@@ -143,19 +142,15 @@
         <b-tab-item label="VMs" icon="desktop">      
           <b-table
             :key="table.key"
-            :data="experiment.vms"
-            :paginated="table.isPaginated"
-            backend-pagination
+            :data="filteredData"
+            :paginated="table.isPaginated"            
             :total="table.total"
             :per-page="table.perPage"
-            :current-page.sync="table.currentPage"
-            @page-change="onPageChange"
+            :current-page.sync="table.currentPage"            
             :pagination-simple="table.isPaginationSimple"
-            :pagination-size="table.paginationSize"
-            backend-sorting
+            :pagination-size="table.paginationSize"            
             :default-sort-direction="table.defaultSortDirection"
             default-sort="name"
-            @sort="onSort"
             ref="vmTable">
               <template slot="empty">
                 <section class="section">
@@ -287,25 +282,21 @@
           <br>
           <b-field v-if="paginationNeeded" grouped position="is-right">
             <div class="control is-flex">
-              <b-switch v-model="table.isPaginated" @input="updateExperiment(); changePaginate();" size="is-small" type="is-light">Paginate</b-switch>
+              <b-switch v-model="table.isPaginated" @input="changePaginate();" size="is-small" type="is-light">Paginate</b-switch>
             </div>
           </b-field>
         </b-tab-item>
         <b-tab-item label="Files" icon="file-alt">
           <b-table            
-            :data="files"
-            :paginated="filesTable.isPaginated  && filesPaginationNeeded"
-            backend-pagination
+            :data="filteredFiles"
+            :paginated="filesTable.isPaginated  && filesPaginationNeeded"            
             :total="filesTable.total"
             :per-page="filesTable.perPage"
-            :current-page.sync="filesTable.currentPage"  
-            @page-change="onFilesPageChange"   
+            :current-page.sync="filesTable.currentPage"               
             :pagination-simple="filesTable.isPaginationSimple"
-            :pagination-size="filesTable.paginationSize"  
-            backend-sorting
+            :pagination-size="filesTable.paginationSize"              
             :default-sort-direction="filesTable.defaultSortDirection"
-            default-sort="date"
-            @sort="onFilesSort">
+            default-sort="date">           
             <template slot="empty">
               <section class="section">
                 <div class="content has-text-white has-text-centered">
@@ -352,7 +343,7 @@
           <br>
           <b-field v-if="filesPaginationNeeded" grouped position="is-right">
             <div class="control is-flex">
-              <b-switch v-model="filesTable.isPaginated" @input="updateFiles(); changeFilesPaginate();" size="is-small" type="is-light">Paginate</b-switch>
+              <b-switch v-model="filesTable.isPaginated" @input="changeFilesPaginate();" size="is-small" type="is-light">Paginate</b-switch>
             </div>
           </b-field>
         </b-tab-item>
@@ -365,6 +356,9 @@
 <script>
   import _ from 'lodash';
 
+  import { BuildTree } from './searchVMs.js';
+  import { BuildFileSearchTree } from './searchFiles.js';
+
   export default {
     beforeDestroy () {
       this.$options.sockets.onmessage = null;
@@ -376,6 +370,7 @@
     },
 
     computed: {
+      
       vms: function() {
         let vms = this.experiment.vms;
         
@@ -393,20 +388,91 @@
       },
 
       filteredData () {
-        if (this.experiment.length == 0) {
-          return []
+
+        if (this.activeTab != 0) {
+          return
+        }
+
+        //console.log(this.experiment.vms)
+
+        let searchResults = []
+        
+        if (this.searchName.length == 0) {              
+              return this.experiment.vms
+        } else if (this.searchName.length < 3) {
+              return this.experiment.vms
         }
         
-        let names = this.experiment.vms.map( vm => { return vm.name; } );
+
+        let expressionTree = BuildTree(this.searchName)
+
+        if (expressionTree === null) {
+          return
+        }       
+
+        for (let i=0;i<this.experiment.vms.length; i++){            
+
+            //expressionTree.printTree()
+            if (expressionTree.evaluate(this.experiment.vms[i])) {
+              searchResults.push(this.experiment.vms[i])
+            }
+        }
+      
         
-        return names.filter(
-          option => {
-            return option
-              .toString()
-              .toLowerCase()
-              .indexOf( this.searchName.toLowerCase() ) >= 0
+        if (searchResults.length > 0) {
+          
+          if (this.searchHistory > this.searchHistoryLength) {
+                  this.searchHistory.pop()
           }
-        )
+            this.searchHistory.push(this.searchName.trim())
+            this.searchHistory = this.getUniqueItems(this.searchHistory)
+         }
+        
+        
+         return searchResults
+        
+      },
+
+      filteredFiles () {
+
+        if (this.activeTab == 0) {
+          return
+        }
+
+        let searchResults = []
+        
+        if (this.searchName.length == 0) {              
+              return this.files
+        } else if (this.searchName.length < 3) {
+              return this.files
+        }
+        
+        let expressionTree = BuildFileSearchTree(this.searchName)
+
+        if (expressionTree === null) {
+          return
+        }       
+
+        for (let i=0;i<this.files.length; i++){ 
+
+            if (expressionTree.evaluate(this.files[i])) {
+              searchResults.push(this.files[i])
+            }
+        }
+      
+        
+        if (searchResults.length > 0) {
+          
+          if (this.searchHistory > this.searchHistoryLength) {
+                  this.searchHistory.pop()
+          }
+            this.searchHistory.push(this.searchName.trim())
+            this.searchHistory = this.getUniqueItems(this.searchHistory)
+         }
+        
+        
+         return searchResults
+        
       },
 
       paginationNeeded () {
@@ -565,6 +631,8 @@
       },
       
       updateExperiment () {
+        let params = '?show_dnb=true'
+        /*
         let params = '?show_dnb=true&filter=' + this.searchName
         params = params + '&sortCol=' + this.table.sortColumn
         params = params + '&sortDir=' + this.table.defaultSortDirection
@@ -573,7 +641,7 @@
           params = params + '&pageNum=' + this.table.currentPage
           params = params + '&perPage=' + this.table.perPage
         }
-
+        */
         this.$http.get( 'experiments/' + this.$route.params.id + params).then(
           response => {
             response.json().then( state => {
@@ -581,16 +649,7 @@
               this.table.total = state.vm_count;
               
               this.vlanModal.vlans = this.experiment.vlans.map( vlan => { return vlan; } );
-
-              // Only add successful searches to the search history
-              if (this.table.total > 0) {
-                if (this.searchHistory > this.searchHistoryLength) {
-                  this.searchHistory.pop()
-                }
-                this.searchHistory.push(this.searchName.trim())
-                this.searchHistory = this.getUniqueItems(this.searchHistory)
-              }
-
+              
               if ( this.roleAllowed('hosts', 'list') ) {
                 this.updateHosts()
               }
@@ -628,23 +687,22 @@
       },
       
       updateDisks () {
+        this.isWaiting = true
         this.$http.get( 'disks' + '?expName=' + this.$route.params.id ).then(
           response => {
-            response.json().then(
+            response.json().then(              
               state => {
-                if ( state.disks.length == 0 ) {
-                  this.isWaiting = true;
-                } else {
-                  for ( let i = 0; i < state.disks.length; i++ ) {
-                    this.disks.push( state.disks[ i ] );
-                  }
+                this.isWaiting = false
 
+                  for ( let i = 0;  i < state.disks.length; i++ ) {
+                    this.disks.push( state.disks[i] );
+                  }   
+                  
                   this.disks.sort()
-                  this.isWaiting = false;
-                }
-              }
+                }        
             );
           }, err => {
+            this.isWaiting = false
             this.errorNotification(err);
           }
         );
@@ -774,7 +832,7 @@
 
       assignCategory ( value ) {
         this.filesTable.category = value;
-        this.updateFiles();
+        //this.updateFiles();
       },
 
       start () {

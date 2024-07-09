@@ -179,7 +179,7 @@
               <option v-for="(  n, index ) in experiment.vlans" 
                 :key="index" 
                 :value="n">
-                {{ n.alias | lowercase }} ({{ n.vlan }})
+                {{ n.alias | lowercase }} ({{ n.vlan }} "-phenix") 
               </option>
             </b-select>
           </b-field>
@@ -530,13 +530,12 @@
             v-model="search.filter"
             :placeholder="searchPlaceholder"
             icon="search"
-            :data="searchHistory"
-            @typing="searchVMs"
-            @select="option => searchVMs(option)">
+            :data="searchHistory"            
+            @select="option => filtered = option">
             <template slot="empty">No results found</template>
           </b-autocomplete>
           <p  class='control'>
-            <button class='button' style="color:#686868" @click="searchVMs(''); filesTable.category = null">
+            <button class='button' style="color:#686868" @click="search.filter = ''; filesTable.category = null">
               <b-icon icon="window-close"></b-icon>
             </button>
           </p>
@@ -560,18 +559,14 @@
       <b-tabs @input="tabsSwitched()" v-model="activeTab">
         <b-tab-item label="VMs" icon="desktop">
           <b-table
-            :data="experiment.vms"
-            :paginated="table.isPaginated"
-            backend-pagination
+            :data="filteredData"
+            :paginated="table.isPaginated"           
             :total="table.total"
-            :per-page="table.perPage"
-            @page-change="onPageChange"
+            :per-page="table.perPage"           
             :pagination-simple="table.isPaginationSimple"
-            :pagination-size="table.paginationSize"
-            backend-sorting
+            :pagination-size="table.paginationSize"            
             default-sort-direction="asc"
-            default-sort="name"
-            @sort="onSort"
+            default-sort="name"            
             ref="vmTable">
             <template slot="empty">
               <section  class="section">
@@ -758,25 +753,21 @@
           <br>
           <b-field v-if="paginationNeeded" grouped position="is-right">
             <div class="control is-flex">
-              <b-switch v-model="table.isPaginated" @input="updateExperiment(); changePaginate();" size="is-small" type="is-light">Paginate</b-switch>
+              <b-switch v-model="table.isPaginated" @input="changePaginate();" size="is-small" type="is-light">Paginate</b-switch>
             </div>
           </b-field>
         </b-tab-item>
         <b-tab-item label="Files" icon="file-alt">
           <b-table            
-            :data="files"
-            :paginated="filesTable.isPaginated"
-            backend-pagination
+            :data="filteredFiles"
+            :paginated="filesTable.isPaginated"            
             :total="filesTable.total"
             :per-page="filesTable.perPage"
-            :current-page.sync="filesTable.currentPage"  
-            @page-change="onFilesPageChange"   
+            :current-page.sync="filesTable.currentPage"              
             :pagination-simple="filesTable.isPaginationSimple"
-            :pagination-size="filesTable.paginationSize"  
-            backend-sorting
+            :pagination-size="filesTable.paginationSize"            
             :default-sort-direction="filesTable.defaultSortDirection"
-            default-sort="date"
-            @sort="onFilesSort">
+            default-sort="date">            
             <template slot="empty">
               <section class="section">
                 <div class="content has-text-white has-text-centered">
@@ -823,7 +814,7 @@
           <br>
           <b-field v-if="filesPaginationNeeded" grouped position="is-right">
             <div class="control is-flex">
-              <b-switch v-model="filesTable.isPaginated" @input="updateFiles(); changeFilesPaginate();" size="is-small" type="is-light">Paginate</b-switch>
+              <b-switch v-model="filesTable.isPaginated" @input="changeFilesPaginate();" size="is-small" type="is-light">Paginate</b-switch>
             </div>
           </b-field>
         </b-tab-item>
@@ -841,12 +832,19 @@
 <script>
   import { mapState }        from 'vuex';
   import VmMountBrowserModal from './VMMountBrowserModal.vue';
+  import { BuildTree } from './searchVMs.js';
+  import { BuildFileSearchTree } from './searchFiles.js';
 
   import _ from 'lodash';
 
   export  default {
     async beforeDestroy () {
       this.$options.sockets.onmessage = null;
+
+      console.log("Destroying component")
+      if (this.screenshotTimer != null){
+        clearInterval(this.screenshotTimer)
+    }
 
       if (this.socket) {
         this.socket.close();
@@ -855,20 +853,110 @@
     },
 
     async created () {
+      console.log("created")
       this.$options.sockets.onmessage = this.handler;
       this.updateExperiment();
+      
+
+      // Setup screenshot refresh timer
+      console.log("Setting up screenshot timer")
+      this.screenshotTimer = setInterval(this.getScreenshots, this.screenshotInterval);
 
       try {
         await this.$http.get(`experiments/${this.$route.params.id}/netflow`);
         this.handleNetflow(true, false);
       } catch { }
-    },
-
+    },   
+   
     computed: {
       filteredData () {
-        return this.search.vms.filter( vm => {
-          return vm.toLowerCase().indexOf( this.search.filter.toLowerCase() ) >= 0
-        })
+
+        if (this.activeTab != 0) {
+          return
+        }
+          
+       
+        let searchResults = []
+        
+        if (this.search.filter.length == 0) {              
+              return this.experiment.vms
+        } else if (this.search.filter.length < 3) {
+              return this.experiment.vms
+        }
+        
+
+        let expressionTree = BuildTree(this.search.filter)
+
+        if (expressionTree === null) {
+          return
+        }       
+
+        for (let i=0;i<this.experiment.vms.length; i++){ 
+
+            
+            if (expressionTree.evaluate(this.experiment.vms[i])) {
+              searchResults.push(this.experiment.vms[i])
+            }
+        }
+      
+        
+        if (searchResults.length > 0) {
+          
+          if (this.searchHistory > this.searchHistoryLength) {
+                  this.searchHistory.pop()
+          }
+            this.searchHistory.push(this.search.filter.trim())
+            this.searchHistory = this.getUniqueItems(this.searchHistory)
+         }
+        
+        
+         return searchResults
+        
+      },
+
+      filteredFiles () {
+
+        if (this.activeTab == 0) {
+          return
+        }
+          
+        
+        let searchResults = []
+        
+        if (this.search.filter.length == 0) {              
+              return this.files
+        } else if (this.search.filter.length < 3) {
+              return this.files
+        }
+        
+
+        let expressionTree = BuildFileSearchTree(this.search.filter)
+
+        if (expressionTree === null) {
+          return
+        }       
+
+        for (let i=0;i<this.files.length; i++){ 
+
+          
+            if (expressionTree.evaluate(this.files[i])) {
+              searchResults.push(this.files[i])
+            }
+        }
+      
+        
+        if (searchResults.length > 0) {
+         
+          if (this.searchHistory > this.searchHistoryLength) {
+                  this.searchHistory.pop()
+          }
+            this.searchHistory.push(this.search.filter.trim())
+            this.searchHistory = this.getUniqueItems(this.searchHistory)
+         }
+        
+        
+         return searchResults
+        
       },
 
       paginationNeeded () {
@@ -934,7 +1022,7 @@
 
       vncLoc (vm) {
         return this.$router.resolve({name: 'vnc', params: {id: this.$route.params.id, name: vm.name, token: this.$store.getters.token}}).href;
-      },
+      },      
 
       searchVMs: _.debounce(function ( term ) {
         if ( term == null ) {
@@ -951,7 +1039,7 @@
 
       switchPagination( enabled ) {
         this.table.isPaginated = enabled;
-        this.updateTable();
+        //this.updateTable();
       },
 
       updateTable ()  {
@@ -1039,6 +1127,12 @@
             }
           }
 
+          case 'experiment/stopped/' + this.$route.params.id: {
+            if (this.screenshotTimer != null){
+              console.log(`Clearing screenshot timer for ${this.$route.params.id}`)
+              clearInterval(this.screenshotTimer)
+            }
+          }
           case  'experiment/vms': {
             if ( msg.resource.action != 'list' ) {
               return;
@@ -1224,6 +1318,7 @@
                       });
                     }
                 
+                     
                     this.experiment.vms = [ ...vms ];
                   }
                   break;
@@ -1248,6 +1343,7 @@
                       duration: 4000
                     });
                 
+                    
                     this.experiment.vms = [ ...vms ];
                   }
 
@@ -1268,6 +1364,7 @@
                   if  ( vms[i].name == vm[ 1 ] ) {
                     vms[i].busy = true; //incase committing message is missed
                     vms[i].percent = percent;
+                   
                     this.experiment.vms = [ ... vms ];
 
                     break;
@@ -1297,6 +1394,7 @@
                         type: 'is-success',
                         duration: 4000
                       });
+                   
                       this.experiment.vms = [ ...vms ];
                       break;
                     }
@@ -1317,6 +1415,7 @@
                       duration: 4000
                     });
                 
+           
                     this.experiment.vms = [ ...vms ];
                     break;
                   }
@@ -1330,6 +1429,7 @@
                   if  ( vms[i].name == vm[ 1 ] ) {
                     vms[i].busy = true; //incase committing message is missed
                     vms[i].percent = percent;
+                    
                     this.experiment.vms = [ ... vms ];
                     break;
                   }
@@ -1341,6 +1441,7 @@
           }
 
           case  'experiment/vm/screenshot': {
+            console.log("Screenshot received from broadcast")
             let vm = msg.resource.name.split( '/' );
             let vms = this.experiment.vms;
 
@@ -1348,11 +1449,13 @@
               case  'update': {                
                 for ( let i = 0; i < vms.length; i++ ) {
                   if  ( vms[i].name == vm[ 1 ] ) {
+                    console.log(msg.result)
                     vms[i].screenshot = msg.result.screenshot;
                     break;
                   }
                 }
 
+                
                 this.experiment.vms = [ ...vms ];                
 
                 break;
@@ -1383,6 +1486,7 @@
                   }
                 }
 
+               
                 this.experiment.vms = [ ...vms ]; 
 
                 this.$buefy.toast.open({
@@ -1429,6 +1533,7 @@
                     });
                   }
 
+                 
                   this.experiment.vms = [ ...vms  ];
                 }
 
@@ -1447,6 +1552,7 @@
                     });
                   }
               
+                 
                   this.experiment.vms = [ ...vms  ];
                 }
 
@@ -1459,6 +1565,7 @@
                 for ( let i = 0; i < vms.length; i++ ) {
                   if  ( vms[i].name == vm[ 1 ] ) {
                     vms[i].percent = percent;
+                   
                     this.experiment.vms = [ ... vms ];
                     break;
                   }
@@ -1478,6 +1585,7 @@
                     });
                   }
 
+                
                   this.experiment.vms = [ ...vms  ];
                 }
 
@@ -1496,6 +1604,7 @@
                     });
                   }
               
+                  
                   this.experiment.vms = [ ...vms  ];
                 }
 
@@ -1523,39 +1632,81 @@
 
       async updateExperiment () {
         try {
-          let resp  = await this.$http.get('experiments/' + this.$route.params.id);
+          let resp  = await this.$http.get(`experiments/${this.$route.params.id}?screenshot=200`);
           let state = await resp.json();
 
-          this.experiment  = state;
+          this.experiment  = state;          
           this.search.vms  = state.vms.map( vm => { return vm.name } );
           this.table.total = state.vm_count;          
+          
 
-          this.updateTable(); 
+          //this.updateTable(); 
         } catch (err) {
           console.log(`ERROR getting experiments: ${err}`);
           this.errorNotification(err);
         } finally {
-          this.isWaiting  = false;
+          this.isWaiting  = false;          
         }
       },
+
+      getScreenshots() {        
+        
+        console.log("Updating screenshots for filtered view")
+
+        if (this.experiment.length == 0){
+          return
+        }
+
+        let visibleItems = this.$refs["vmTable"].visibleData
+        console.log(visibleItems)
+                          
+        for(let i = 0; i<visibleItems.length;i++){           
+            this.getScreenshot(visibleItems[i].name)
+        }
+
+      },
+
+      getScreenshot (vmName)  {
+        
+        //this.isWaiting = true
+        console.log(`Getting screenshot for ${vmName}`)
+       
+        this.$http.get( `experiments/${this.$route.params.id}/vms/${vmName}/screenshot.png?size=200&base64=true` ).then(          
+          response  => {
+              //this.isWaiting = false             
+              let responseName = response.url.match('/vms[/]([^/]+)')[1]              
+
+              for(let i =0;i<this.experiment.vms.length;i++){
+                if(this.experiment.vms[i].name == responseName){
+                  console.log(`Updating screenshot for ${responseName}`)
+                  this.experiment.vms[i].screenshot = response.body                    
+                  break
+                }
+              }
+          },  err => {
+            console.log(`Getting screenshot for ${vmName} failed ${err.status}`);
+            this.isWaiting = false;
+            this.errorNotification(err);
+          }
+        );
+      },
+
     
       updateDisks (diskType="")  {
         this.disks = [];
-      
-        this.$http.get( `disks?diskType=${diskType}` ).then(
+        this.isWaiting = true
+
+        this.$http.get( `disks?diskType=${diskType}` ).then(          
           response  => {
-            response.json().then(
+            response.json().then(              
               state =>  {
-                if ( state.disks.length == 0 ) {
-                  this.isWaiting  = true;
-                } else {
+                this.isWaiting = false
+
                   for ( let i = 0;  i < state.disks.length; i++ ) {
                     this.disks.push( state.disks[i] );
-                  }
+                  }   
                   
-                  this.isWaiting  = false;
                 }
-              }
             );
           },  err => {
             console.log('Getting the disks failed with ' + err.status);
@@ -1575,7 +1726,7 @@
         
         if (this.activeTab == 0){
           this.searchPlaceholder = "Find a VM"         
-          this.updateExperiment()          
+          //this.updateExperiment()          
         }
         else {
           this.searchPlaceholder = "Find a File" 
@@ -1659,7 +1810,7 @@
 
       assignCategory ( value ) {
         this.filesTable.category = value;
-        this.updateFiles();
+        //this.updateFiles();
       },
 
       async fetchVMDetails(vm) {
@@ -1996,6 +2147,7 @@
                           break;
                         }
                       }
+                     
                       this.experiment.vms = [ ...vms  ];
                       this.isWaiting  = false;
                     }
@@ -2086,7 +2238,7 @@
             return response.json().then(
               json  => {
                 let captures  = json.captures;
-                let capturing = false;
+                let capturing = false;               
 
                 if ( captures ) {
                   for ( let i = 0;  i < captures.length; i++ ) {
@@ -2122,6 +2274,7 @@
                               }
                             }
 
+                            
                             this.experiment.vms = [ ...vms ]
                             this.isWaiting = false;
                           }
@@ -2160,13 +2313,15 @@
                           if  ( response.status == 204 ) {
                             let vms = this.experiment.vms;
 
+                        
                             for ( let i = 0; i < vms.length; i++ ) {
                               if  ( vms[i].name == response.body.name ) {
                                 vms[i] = response.body;
                                 break;
                               }
                             }
-
+                            
+                           
                             this.experiment.vms = [ ...vms ]
                             this.isWaiting = false;
                           }
@@ -2233,6 +2388,7 @@
                         break;
                       }
                     }
+                   
                     this.experiment.vms = [ ...vms ];
                     this.isWaiting = false;
                   },  err => {
@@ -2294,6 +2450,7 @@
                         break;
                       }
                     } 
+                    
                     this.experiment.vms = [ ...vms ];
                     this.isWaiting = false;
                   },  err => {
@@ -2358,6 +2515,8 @@
                           break;
                         }
                       } 
+
+                     
                       this.experiment.vms = [ ...vms  ];
                       this.isWaiting  = false;
                     }, err => {
@@ -2422,6 +2581,8 @@
                           break;
                         }
                       } 
+
+                      
                       this.experiment.vms = [ ...vms  ];
                       this.isWaiting  = false;
                     }, err => {
@@ -2486,6 +2647,7 @@
                           break;
                         }
                       } 
+                     
                       this.experiment.vms = [ ...vms  ];                      
                       this.isWaiting  = false;
                     }, err => {
@@ -2578,6 +2740,7 @@
                     }
                   }
 
+                 
                   this.experiment.vms = [ ...vms  ];
                   this.isWaiting  = false;
                 }, err => {
@@ -2620,6 +2783,7 @@
                     }
                   }
 
+                 
                   this.experiment.vms = [ ...vms  ];
                   this.isWaiting  = false;
                 }, err => {
@@ -2695,6 +2859,7 @@
                   
                 }
               } 
+              
               this.experiment.vms = [ ...vms ];
               this.isWaiting = false;
                   
@@ -2771,6 +2936,7 @@
                   
                 }
               } 
+             
               this.experiment.vms = [ ...vms ];
               this.isWaiting = false;
                   
@@ -3301,7 +3467,7 @@
           vmName: null          
         },
         apps: null,
-        experiment: [],
+        experiment: [],        
         files: [],
         disks: [],
         vlan: null,
@@ -3326,6 +3492,8 @@
         searchHistoryLength:10,
         searchPlaceholder:"Find a VM",
         activeTab:0,
+        screenshotInterval:5000,
+        screenshotTimer:null,
         netflow: {
           tooltip: "Start Netflow Capture",
           capturing: false,
