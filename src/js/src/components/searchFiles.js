@@ -1,7 +1,7 @@
 const FILE_SEARCH_CONST = {
-	dateRe:/[<>=]{1,2}[ ]?\d{4}[-]\d{2}(?:[\d-]+(?:[ ][\d:]+)?)?/,
-    sizeRe:/[<>=]{1,2}[ ]?\d+(?:[ ]?(?:b|kb|mb|gb))?/,
-    categoryRe:/^(?:packet|elf|vm)/,
+	  dateRe:/[<>=]{1,2}[ ]?\d{4}[-]\d{2}(?:[\d-]+(?:[ ][\d:z]+)?)?/g,
+    sizeRe:/[<>=]{1,2}[ ]?\d+(?:[ ]?(?:b|kb|mb|gb))?/g,
+    categoryRe:/^(?:packet|elf|vm)/g,
     comparisonOps:/[<>=]{1,2}/,
     fileSizeSpec:/(?:b|kb|mb|gb)/,
     boolOps:/^(?:and|or|not)$/,
@@ -92,9 +92,9 @@ class ExpressionTree {
 	}
 
 	
-	match(file) {		
+	match(file) {		    
 
-        let compOp, newTerm, layout,fileSize;
+    let compOp, newTerm, layout,fileSize;
 
 		for (const [key,field] of Object.entries(this.searchFields)) {
 			
@@ -129,8 +129,9 @@ class ExpressionTree {
                     
                     if (FILE_SEARCH_CONST.comparisonOps.test(this.term)) {
                         compOp = FILE_SEARCH_CONST.comparisonOps.exec(this.term)[0];                      
-                        newTerm = this.term.replace(FILE_SEARCH_CONST.comparisonOps, "");
-                    }
+                        newTerm = this.term.replace(FILE_SEARCH_CONST.comparisonOps, "");      
+                        newTerm = newTerm.replace("_"," "); 
+                    }               
 
                     // Make sure a valid comparison operator was found
                     if (compOp.length === 0) {
@@ -149,7 +150,7 @@ class ExpressionTree {
                      fileDateTime = new Date(file.date);
                     } catch (e) {
                      return false;
-                    }                    
+                    }                                        
 
                     switch (compOp) {
                         case "<":
@@ -246,8 +247,8 @@ function BuildFileSearchTree(searchFilter) {
 	// Adjust any parentheses so that they are
 	// space delimited	  
 	if (FILE_SEARCH_CONST.groups.test(searchFilter)) {
-	  searchFilter = searchFilter.replace(/\(/g, '( ');
-	  searchFilter = searchFilter.replace(/\)/g, ' )');
+	  searchFilter = searchFilter.replaceAll('(', '( ');
+	  searchFilter = searchFilter.replaceAll(')', ' )');
 	}
 
 	let searchString = searchFilter.toLowerCase();
@@ -257,21 +258,22 @@ function BuildFileSearchTree(searchFilter) {
     // The date string will be a special case as we
     // replace the 1st space and the 2nd space with
     // different placeholders
-    if (FILE_SEARCH_CONST.dateRe.test(searchString)) {
-        const matches = searchString.match(FILE_SEARCH_CONST.dateRe);
-    
+    if (searchString.search(FILE_SEARCH_CONST.dateRe) != -1) {
+        const matches = searchString.match(FILE_SEARCH_CONST.dateRe);  
+
         for (const match of matches) {
-        let replacement;
-        if (match[0].split(" ").length > 1) {
-            replacement = match[0].replace(" ", FILE_SEARCH_CONST.spaceReplacement, 1);
-            replacement = replacement.replaceAll(" ", "_");
-        } else if (match[0].split(" ").length === 1 && match[0].split("-").length === 3) {
-            replacement = match[0].replaceAll(" ", "_");
-        } else {
-            replacement = match[0].replace(" ", FILE_SEARCH_CONST.spaceReplacement, 1);
-        }
-    
-        searchString = searchString.replaceAll(match[0], replacement);
+          let replacement;
+          if (match.split(" ").length > 1) {
+              replacement = match.replace(" ", FILE_SEARCH_CONST.spaceReplacement, 1);
+              replacement = replacement.replaceAll(" ", "_");
+          } else if (match.split(" ").length === 1 && match.split("-").length === 3) {
+              replacement = match.replaceAll(" ", "_");
+          } else {
+              replacement = match.replace(" ", FILE_SEARCH_CONST.spaceReplacement, 1);
+          }   
+      
+          // Update search string with replacements 
+          searchString = searchString.replaceAll(match, replacement);
         }
     }
     
@@ -403,10 +405,10 @@ function createTree(postFix) {
                 operand.term = term;
 
                 // Replace any space placeholders to return
-				// the correct search fields
-                operand.term = operand.term.replace(FILE_SEARCH_CONST.spaceReplacement,"");
+				        // the correct search fields
+                operand.term = operand.term.replaceAll(FILE_SEARCH_CONST.spaceReplacement,"");
 
-                operand.searchFields = getSearchFields(term);
+                operand.searchFields = getSearchFields(operand.term);
             }
             stack.push(operand);
 		}
@@ -421,12 +423,12 @@ function createTree(postFix) {
 	  
 	  
 function getSearchFields(term) {
-		
-	if (FILE_SEARCH_CONST.dateRe.test(term)) {
+ 		
+	if (term.search(FILE_SEARCH_CONST.dateRe) != -1) {
 		return ["Date"];
-	} else if (FILE_SEARCH_CONST.sizeRe.test(term)) {
+	} else if (term.search(FILE_SEARCH_CONST.sizeRe) != -1) {
 		return ["Size"];
-	} else if (FILE_SEARCH_CONST.categoryRe.test(term)) {
+	} else if (term.search(FILE_SEARCH_CONST.categoryRe) != -1) {
 		return ["Category"];	
 	} else {
 		return FILE_SEARCH_CONST.defaultSearchFields;
@@ -453,18 +455,20 @@ function dateTimeEqual(t, t1, layout) {
     }
   }
   
-  function addPlaceholderSpaces(searchString, pattern) {
-    // Replace spaces with the replacement string
-    if (pattern.test(searchString)) {
-      const extracted = searchString.match(pattern);
-      for (const match of extracted) {
-        const replacement = match.replace(/ /g, FILE_SEARCH_CONST.spaceReplacement);
-        searchString = searchString.replace(match, replacement);
-      }
-    }
-  
-    return searchString;
+function addPlaceholderSpaces(searchString, pattern) {
+
+  // Replace spaces with the replacement string
+  if (searchString.search(pattern) != -1) {
+    const extracted = searchString.match(pattern);
+    for (const match of extracted) {
+      const replacement = match.replaceAll(" ", FILE_SEARCH_CONST.spaceReplacement);
+      searchString = searchString.replaceAll(match, replacement);
+    }   
   }
+ 
+  
+  return searchString;
+}
   
   
 	  
