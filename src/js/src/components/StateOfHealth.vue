@@ -570,13 +570,14 @@ export default {
       const nodes = this.nodes.map( d => Object.create( d ) );
       const links = this.edges.map( d => Object.create( d ) );
 
-      const width = 600;
-      const height = 400;
+      const width = window.innerWidth;
+      const height = window.innerHeight;
 
       const simulation = d3.forceSimulation( nodes )
         .force( "link", d3.forceLink( links ).id( d => d.id ) )
         .force( "charge", d3.forceManyBody() )
-        .force( "center", d3.forceCenter( width / 2, height / 2 ) );
+        .force( "center", d3.forceCenter( width / 2, height / 2 ) )
+        .force( "collide", d3.forceCollide().radius(d => d.radius));
 
       d3.select( "#graph" ).select( "svg" ).remove();
 
@@ -585,13 +586,16 @@ export default {
 
       const g = svg.append( "g" );
 
-      svg.call( d3.zoom()
+      let zoom = d3.zoom()
         .extent( [ [ 0, 0 ], [ width, height ] ] )
-        .scaleExtent([  -5, 5 ] )
+        .scaleExtent([  -5, 5 ] )           
         .on( "zoom", function ( { transform } ) {
           g.attr( "transform", transform );
         })
-      );
+             
+      //d3.select('svg').transition().call(zoom.scaleBy,1.5)
+      d3.select('svg').transition().call(zoom.scaleTo,1)
+      
 
       const link = g.append( "g" )
         .attr( "stroke", "#999" )
