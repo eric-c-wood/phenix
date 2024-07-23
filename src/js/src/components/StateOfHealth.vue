@@ -541,8 +541,11 @@ export default {
         "notboot":    "black",
         "notdeploy":  "#FFD479", // yellow
         "external":   "#005493", // blue
+        "ignore":     "#d9d9d9", // grey
       }
 
+      return colors[ node.status ];
+      /*
       if (node.status === "external") {
         return colors[node.status];
       }
@@ -560,6 +563,7 @@ export default {
       }
 
       return colors[ node.status ];
+      */
     },
 
     generateGraph () {
@@ -575,9 +579,9 @@ export default {
 
       const simulation = d3.forceSimulation( nodes )
         .force( "link", d3.forceLink( links ).id( d => d.id ) )
-        .force( "charge", d3.forceManyBody() )
+        .force( "charge", d3.forceManyBody().strength(-100) )
         .force( "center", d3.forceCenter( width / 2, height / 2 ) )
-        .force( "collide", d3.forceCollide().radius(d => d.radius));
+        .force( "collide", d3.forceCollide().radius(d => d.radius*5));
 
       d3.select( "#graph" ).select( "svg" ).remove();
 
@@ -588,15 +592,17 @@ export default {
 
       let zoom = d3.zoom()
         .extent( [ [ 0, 0 ], [ width, height ] ] )
-        .scaleExtent([  -5, 5 ] )           
+        .scaleExtent([  -5, 5 ] )          
+        //.transform
         .on( "zoom", function ( { transform } ) {
+          console.log(`Transform:${transform}`)
           g.attr( "transform", transform );
         })
-             
-      //d3.select('svg').transition().call(zoom.scaleBy,1.5)
-      d3.select('svg').transition().call(zoom.scaleTo,1)
       
-
+      
+      svg.call(zoom)
+      svg.transition().duration(1500).call(zoom.scaleTo,2)
+      
       const link = g.append( "g" )
         .attr( "stroke", "#999" )
         .attr( "stroke-opacity", 0.6 )
