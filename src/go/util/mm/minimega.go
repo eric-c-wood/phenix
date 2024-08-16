@@ -485,7 +485,7 @@ func (Minimega) ConnectVMInterface(opts ...Option) error {
 	o := NewOptions(opts...)
 
 	cmd := mmcli.NewNamespacedCommand(o.ns)
-	cmd.Command = fmt.Sprintf("vm net connect %s %d %s", o.vm, o.connectIface, o.connectVLAN)
+	cmd.Command = fmt.Sprintf("vm net connect %s %d %s %s", o.vm, o.connectIface, o.connectVLAN, o.bridge)
 
 	if err := mmcli.ErrorResponse(mmcli.Run(cmd)); err != nil {
 		return fmt.Errorf("connecting interface %d on VM %s to VLAN %s in namespace %s: %w", o.connectIface, o.vm, o.connectVLAN, o.ns, err)
@@ -508,21 +508,10 @@ func (Minimega) DisconnectVMInterface(opts ...Option) error {
 }
 
 func (Minimega) CreateTunnel(opts ...Option) error {
-	host, err := GetVMHost(opts...)
-	if err != nil {
-		return fmt.Errorf("unable to determine what host the VM is scheduled on: %w", err)
-	}
-
 	o := NewOptions(opts...)
 
-	var cmdPrefix string
-
-	if !IsHeadnode(host) {
-		cmdPrefix = fmt.Sprintf("mesh send %s namespace %s", host, o.ns)
-	}
-
 	cmd := mmcli.NewNamespacedCommand(o.ns)
-	cmd.Command = fmt.Sprintf("%s cc tunnel %s %d %s %d", cmdPrefix, o.vm, o.srcPort, o.dstHost, o.dstPort)
+	cmd.Command = fmt.Sprintf("cc tunnel %s %d %s %d", o.vm, o.srcPort, o.dstHost, o.dstPort)
 
 	if err := mmcli.ErrorResponse(mmcli.Run(cmd)); err != nil {
 		return fmt.Errorf("creating tunnel to %s (%d:%s:%d): %w", o.vm, o.srcPort, o.dstHost, o.dstPort, err)
@@ -555,25 +544,12 @@ func (Minimega) GetTunnels(opts ...Option) []map[string]string {
 func (Minimega) CloseTunnel(opts ...Option) error {
 	tunnels := GetTunnels(opts...)
 
-	host, err := GetVMHost(opts...)
-	if err != nil {
-		return fmt.Errorf("unable to determine what host the VM is scheduled on: %w", err)
-	}
-
 	o := NewOptions(opts...)
-
-	var (
-		cmdPrefix string
-		errs      error
-	)
-
-	if !IsHeadnode(host) {
-		cmdPrefix = fmt.Sprintf("mesh send %s namespace %s", host, o.ns)
-	}
+	var errs error
 
 	for _, row := range tunnels {
 		cmd := mmcli.NewNamespacedCommand(o.ns)
-		cmd.Command = fmt.Sprintf("%s cc tunnel close %s %s", cmdPrefix, o.vm, row["id"])
+		cmd.Command = fmt.Sprintf("cc tunnel close %s %s", o.vm, row["id"])
 
 		if err := mmcli.ErrorResponse(mmcli.Run(cmd)); err != nil {
 			errs = multierror.Append(errs, fmt.Errorf("closing tunnel to %s (%s:%d): %w", o.vm, o.dstHost, o.dstPort, err))
@@ -698,7 +674,7 @@ func (this Minimega) GetVMCaptures(opts ...Option) []Capture {
 	return keep
 }
 
-func (this Minimega) GetClusterHosts(schedOnly bool) (Hosts, error) {
+func (Minimega) GetClusterHosts(schedOnly bool) (Hosts, error) {
 	// Get headnode details
 	hosts, err := processNamespaceHosts("minimega")
 	if err != nil {
@@ -736,10 +712,6 @@ func (this Minimega) GetClusterHosts(schedOnly bool) (Hosts, error) {
 		host.Name = common.TrimHostnameSuffixes(host.Name)
 		host.Schedulable = true
 
-		// Add disk info
-		host.DiskUsage.Phenix = this.getDiskUsage(host.Name, common.PhenixBase)
-		host.DiskUsage.Minimega = this.getDiskUsage(host.Name, common.MinimegaBase)
-
 		cluster = append(cluster, host)
 	}
 
@@ -749,35 +721,9 @@ func (this Minimega) GetClusterHosts(schedOnly bool) (Hosts, error) {
 
 	head.Name = common.TrimHostnameSuffixes(head.Name)
 
-	// Add disk info
-	head.DiskUsage.Phenix = this.getDiskUsage(head.Name, common.PhenixBase)
-	head.DiskUsage.Minimega = this.getDiskUsage(head.Name, common.MinimegaBase)
-
 	cluster = append(cluster, head)
 
 	return cluster, nil
-}
-
-func (this Minimega) GetNamespaceHosts(ns string) (Hosts, error) {
-	var hosts []Host
-
-	// Get namespace nodes details
-	processed, err := processNamespaceHosts(ns)
-	if err != nil {
-		return nil, fmt.Errorf("processing namespace nodes details: %w", err)
-	}
-
-	for _, host := range processed {
-		host.Name = common.TrimHostnameSuffixes(host.Name)
-
-		// Add disk info
-		host.DiskUsage.Phenix = this.getDiskUsage(host.Name, common.PhenixBase)
-		host.DiskUsage.Minimega = this.getDiskUsage(host.Name, common.MinimegaBase)
-
-		hosts = append(hosts, host)
-	}
-
-	return hosts, nil
 }
 
 func (Minimega) Headnode() string {
@@ -825,6 +771,37 @@ func (Minimega) GetVLANs(opts ...Option) (map[string]int, error) {
 	}
 
 	return vlans, nil
+}
+
+// Returns the first bridge associated
+// with the vlanAlias
+func GetBridge(vlanAlias string) string {
+
+	cmd := mmcli.NewCommand()
+	cmd.Command = "bridge"
+
+	for _, row := range mmcli.RunTabular(cmd) {
+
+		bridge := row["bridge"]
+
+		s := row["vlans"]
+		s = strings.TrimPrefix(s, "[")
+		s = strings.TrimSuffix(s, "]")
+
+		vlans := strings.Split(s, " ")
+		for _, vlan := range vlans {
+
+			if strings.Contains(vlan, vlanAlias) {
+
+				if strings.EqualFold(strings.Trim(vlan), vlanAlias) {
+					return bridge
+				}
+
+			}
+		}
+	}
+
+	return ""
 }
 
 func (Minimega) IsC2ClientActive(opts ...C2Option) error {
@@ -1177,33 +1154,6 @@ func (Minimega) MeshShell(host, command string) error {
 	return nil
 }
 
-func (Minimega) MeshShellResponse(host, command string) (string, error) {
-	cmd := mmcli.NewCommand()
-
-	if host == "" {
-		host = Headnode()
-	}
-
-	if IsHeadnode(host) {
-		cmd.Command = fmt.Sprintf("shell %s", command)
-	} else {
-		cmd.Command = fmt.Sprintf("mesh send %s shell %s", host, command)
-	}
-
-	for resps := range mmcli.Run(cmd) {
-		for _, resp := range resps.Resp {
-			if resp.Error != "" {
-				plog.Warn("error running shell command: ", "cmd", cmd)
-				continue
-			}
-
-			return strings.TrimSpace(resp.Response), nil
-		}
-	}
-
-	return "", fmt.Errorf("error running MeshShellResponse()")
-}
-
 func (Minimega) MeshSend(ns, host, command string) error {
 	var cmd *mmcli.Command
 
@@ -1376,20 +1326,4 @@ func processNamespaceHosts(namespace string) (Hosts, error) {
 	}
 
 	return hosts, nil
-}
-
-// Run shell command to get disk usage for `path` on `host`
-func (this Minimega) getDiskUsage(host string, path string) float64 {
-	diskUsage := 0.0
-
-	cmd := fmt.Sprintf(`bash -c "echo $(df %s | awk '{print $(NF-1)}' | tail -1)"`, path)
-	resp, err := this.MeshShellResponse(host, cmd)
-
-	if (resp == "") || (err != nil) {
-		return diskUsage
-	}
-
-	diskUsage, _ = strconv.ParseFloat(strings.TrimSuffix(resp, "%"), 64)
-
-	return diskUsage
 }

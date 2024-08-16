@@ -286,7 +286,7 @@ func Update(opts ...UpdateOption) error {
 		if o.iface.vlan == "" {
 			return Disonnect(o.exp, o.vm, o.iface.index)
 		} else {
-			return Connect(o.exp, o.vm, o.iface.index, o.iface.vlan)
+			return Connect(o.exp, o.vm, o.iface.index, o.iface.vlan, o.iface.bridge)
 		}
 	}
 
@@ -1477,16 +1477,13 @@ func ChangeOpticalDisc(expName, vmName, isoPath string) error {
 		return fmt.Errorf("no optical disc path provided")
 	}
 
-	
-	cmd := mmcli.NewNamespacedCommand(expName)	
-	cmd.Command = fmt.Sprintf("vm cdrom change %s %s",vmName,isoPath)
+	cmd := mmcli.NewNamespacedCommand(expName)
+	cmd.Command = fmt.Sprintf("vm cdrom change %s %s", vmName, isoPath)
 
 	if err := mmcli.ErrorResponse(mmcli.Run(cmd)); err != nil {
 		return fmt.Errorf("changing optical disc for VM %s: %w", vmName, err)
 	}
-	
 
-	
 	return nil
 }
 
@@ -1501,15 +1498,12 @@ func EjectOpticalDisc(expName, vmName string) error {
 		return fmt.Errorf("no VM name provided")
 	}
 
-		
-	cmd := mmcli.NewNamespacedCommand(expName)	
-	cmd.Command = fmt.Sprintf("vm cdrom eject %s",vmName)
+	cmd := mmcli.NewNamespacedCommand(expName)
+	cmd.Command = fmt.Sprintf("vm cdrom eject %s", vmName)
 
 	if err := mmcli.ErrorResponse(mmcli.Run(cmd)); err != nil {
 		return fmt.Errorf("ejecting optical disc for VM %s: %w", vmName, err)
 	}
 
-	
 	return nil
 }
-

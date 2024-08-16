@@ -1041,7 +1041,7 @@ func UpdateVM(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.Interface != nil {
-		opts = append(opts, vm.UpdateWithInterface(int(req.Interface.Index), req.Interface.Vlan))
+		opts = append(opts, vm.UpdateWithInterface(int(req.Interface.Index), req.Interface.Vlan, req.Interface.bridge))
 	}
 
 	switch req.Boot.(type) {
@@ -1138,7 +1138,8 @@ func UpdateVMs(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if vmRequest.Interface != nil {
-			opts = append(opts, vm.UpdateWithInterface(int(vmRequest.Interface.Index), vmRequest.Interface.Vlan))
+			opts = append(opts, vm.UpdateWithInterface(int(vmRequest.Interface.Index),
+				vmRequest.Interface.Vlan, vmRequest.Interface.bridge))
 		}
 
 		switch vmRequest.Boot.(type) {

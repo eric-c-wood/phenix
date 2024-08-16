@@ -80,6 +80,7 @@ message UpdateVMRequestList {
 message VMInterface {
   uint32 index = 1;
   string vlan = 2;
+  string bridge = 3;
 }
 
 message MemorySnapshotRequest {
